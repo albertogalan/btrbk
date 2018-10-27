@@ -56,7 +56,8 @@ set -u
 set -e
 set -o pipefail
 
-# defaults: ignore root folder timestamp change (see below)
+# defaults: ignore dirs and root folder timestamp change (see below)
+ignore_dirs=1
 ignore_root_folder_timestamp=1
 ssh_identity=
 ssh_start_agent=
@@ -89,6 +90,10 @@ while [[ "$#" -ge 1 ]]; do
           # NOTE: this overrides all btrbk ssh_* options
           ssh_identity="$2"
           shift
+          ;;
+      --strict)
+          ignore_dirs=
+          ignore_root_folder_timestamp=
           ;;
       --ignore-acls)
           rsync_args=(${rsync_args[@]/-A})
@@ -155,6 +160,9 @@ count_rsync_diffs()
             if [[ -n "$ignore_root_folder_timestamp" ]] && [[ "$rsync_line" == ".d..t...... ./" ]]; then
                 # ignore timestamp on root folder, for some reason this does not match
                 postfix_txt=" # IGNORE reason=ignore_root_folder_timestamp"
+            elif [[ -n "$ignore_dirs" ]] && [[ "$rl_flags" == "cd+++++++++" ]]; then
+                # nested subvolumes appear as new empty directories ("cd+++++++++") in rsync (btrfs bug?)
+                postfix_txt=" # IGNORE reason=ignore_dirs"
             else
                 nn=$((nn+1))
                 postfix_txt=" # DIFF count=$nn"
@@ -231,6 +239,7 @@ btrbk_cmd=("btrbk" "list" "$list_subcommand" "--format=raw" "${btrbk_args[@]}")
             [[ -n "$source_rsh" ]] && rsync_cmd+=(-e "$(rsync_rsh "$source_rsh")")
             rsync_cmd+=("${src}/" "${dest}/")
             #rsync_cmd=("echo" '........... SHOULD/FAIL/');   # simulate failure
+            #rsync_cmd=("echo" 'cd+++++++++ SHOULD/IGNORE/'); # simulate ignored
             if [[ -n "$dryrun" ]]; then
                 rsync_cmd=("cat" "/dev/null");
             fi
