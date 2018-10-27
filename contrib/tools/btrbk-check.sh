@@ -36,6 +36,11 @@
 #     Check ALL backups from targets in /etc/btrbk/btrbk.conf.
 #     NOTE: This really re-checks ALL files FOR EACH BACKUP!
 #
+#   btrbk-check.sh --ssh-identity /etc/btrbk/ssh/id_ed25519
+#
+#     Use "ssh -i /etc/btrbk/ssh/id_ed25519 -l root" for rsync rsh
+#     (see btrbk.conf(5)).
+#
 #
 # SEE ALSO
 #
@@ -53,6 +58,8 @@ set -o pipefail
 
 # defaults: ignore root folder timestamp change (see below)
 ignore_root_folder_timestamp=1
+ssh_identity=
+ssh_start_agent=
 
 verbose=0
 rsync_log=
@@ -73,6 +80,15 @@ while [[ "$#" -ge 1 ]]; do
           ;;
       --stats)
           rsync_args+=(--info=stats2)
+          ;;
+      --ssh-agent)
+          ssh_start_agent=1
+          ;;
+      --ssh-identity)
+          # use different ssh identity (-i option) for rsync rsh.
+          # NOTE: this overrides all btrbk ssh_* options
+          ssh_identity="$2"
+          shift
           ;;
       --ignore-acls)
           rsync_args=(${rsync_args[@]/-A})
@@ -160,7 +176,10 @@ rsync_rsh()
     local rsh_match="(.*) ([a-z0-9_-]+)@([a-zA-Z0-9.-]+)$"
 
     if [[ -z "$rsh" ]]; then
-        echo ""
+        echo
+    elif [[ -n "$ssh_identity" ]]; then
+        # rsync really needs root on target
+        echo "ssh -q -i $ssh_identity -l root"
     elif [[ $rsh =~ $rsh_match ]]; then
         echo "${BASH_REMATCH[1]} -l ${BASH_REMATCH[2]}"
     else
@@ -169,6 +188,25 @@ rsync_rsh()
     fi
 }
 
+kill_ssh_agent()
+{
+    echo "Stopping SSH agent"
+    eval `ssh-agent -k`
+}
+
+start_ssh_agent()
+{
+    if [[ -z "$ssh_identity" ]]; then
+        echo "ERROR: no SSH identity specified for agent"
+        return
+    fi
+    echo "Starting SSH agent"
+    eval `ssh-agent -s`
+    trap kill_ssh_agent EXIT
+    ssh-add "$ssh_identity"
+}
+
+[[ -n "$ssh_start_agent" ]] && start_ssh_agent
 
 [[ $verbose -ge 1 ]] && echo "Resolving $list_subcommand"
 
